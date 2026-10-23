@@ -1,0 +1,786 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#080c10">
+<link rel="manifest" href="data:application/json,{&quot;name&quot;:&quot;Anton's Air Monitor&quot;,&quot;short_name&quot;:&quot;AirMonitor&quot;,&quot;start_url&quot;:&quot;.&quot;,&quot;display&quot;:&quot;standalone&quot;,&quot;background_color&quot;:&quot;#080c10&quot;,&quot;theme_color&quot;:&quot;#080c10&quot;,&quot;icons&quot;:[{&quot;src&quot;:&quot;data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌬️</text></svg>&quot;,&quot;sizes&quot;:&quot;any&quot;,&quot;type&quot;:&quot;image/svg+xml&quot;}]}">
+<title>Anton's Air Monitor</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<style>
+:root{
+  --bg:#080c10;--surface:#0e1419;--border:#1c2330;
+  --text:#cdd6e0;--muted:#5a6a7a;
+  --good:#23c55e;--moderate:#eab308;--sensitive:#f97316;
+  --unhealthy:#ef4444;--vunhealthy:#a855f7;--hazardous:#7e0023;
+  --co2:#38bdf8;--outdoor:#fb923c;--tps:#c084fc;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;font-size:14px;min-height:100vh}
+#gate{position:fixed;inset:0;background:#080c10;display:flex;align-items:center;justify-content:center;z-index:300}
+.gate-box{background:#0e1419;border:1px solid #1c2330;border-radius:12px;padding:36px 40px;width:320px;display:flex;flex-direction:column;gap:18px}
+.gate-title{font-size:22px;font-weight:700;color:#cdd6e0}
+.gate-sub{font-size:12px;color:#5a6a7a}
+#pw-input{background:#080c10;border:1px solid #1c2330;border-radius:6px;padding:10px 14px;color:#cdd6e0;font-size:14px;outline:none;width:100%;transition:border-color .2s}
+#pw-input:focus{border-color:#23c55e}
+#pw-err{display:none;font-size:11px;color:#ef4444}
+.gate-btn{background:#23c55e;border:none;border-radius:6px;padding:11px;color:#000;font-size:13px;font-weight:700;cursor:pointer;transition:opacity .15s}
+.gate-btn:hover{opacity:.85}
+#alert-bar{display:none;padding:12px 24px;font-size:13px;font-weight:600;background:rgba(239,68,68,.15);border-bottom:1px solid rgba(239,68,68,.35);color:#ef4444;align-items:center;gap:10px}
+#alert-bar.show{display:flex}
+#alert-bar span{flex:1}
+#alert-close{background:none;border:none;color:#ef4444;cursor:pointer;font-size:16px;line-height:1}
+header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;padding:16px 24px;border-bottom:1px solid var(--border)}
+header h1{font-size:15px;font-weight:600;letter-spacing:.02em}
+.header-right{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+#aqi-badge{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;transition:all .4s;white-space:nowrap}
+#aqi-dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+#refresh-countdown{font-size:11px;color:var(--muted);font-family:monospace}
+#last-ts{font-size:11px;color:var(--muted);font-family:monospace}
+.summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:1px;background:var(--border);border-bottom:1px solid var(--border)}
+.stat{background:var(--surface);padding:16px 18px;display:flex;flex-direction:column;gap:3px}
+.stat-label{font-size:10px;color:var(--muted);letter-spacing:.03em}
+.stat-value{font-size:24px;font-weight:700;font-family:monospace;line-height:1;transition:color .4s}
+.stat-sub{font-size:10px;color:var(--muted);font-family:monospace}
+#weather-bar{display:flex;gap:20px;flex-wrap:wrap;align-items:center;padding:10px 24px;border-bottom:1px solid var(--border);font-size:12px;color:var(--muted);background:var(--surface)}
+#weather-bar b{color:var(--text)}
+.w-sep{color:var(--border)}
+.controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:12px 24px;border-bottom:1px solid var(--border)}
+.btn-group{display:flex;gap:2px;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:2px}
+.btn-group button{background:none;border:none;color:var(--muted);padding:5px 11px;border-radius:4px;font-size:12px;cursor:pointer;transition:background .15s,color .15s}
+.btn-group button.active{background:var(--border);color:var(--text)}
+.sep{flex:1}
+#refresh-btn{background:none;border:1px solid var(--border);color:var(--muted);padding:5px 14px;border-radius:6px;font-size:12px;cursor:pointer;transition:border-color .15s,color .15s}
+#refresh-btn:hover{border-color:var(--text);color:var(--text)}
+.charts{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--border)}
+@media(max-width:720px){.charts{grid-template-columns:1fr}}
+.chart-card{background:var(--surface);padding:18px 18px 14px;display:flex;flex-direction:column;gap:10px}
+.chart-card.wide{grid-column:1/-1}
+.chart-title{font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.04em;display:flex;align-items:center;gap:8px}
+.chart-wrap{position:relative;height:190px}
+.chart-card.wide .chart-wrap{height:230px}
+.legend-dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+#ann-tooltip{position:fixed;display:none;background:#0e1419;border:1px solid #1c2330;border-radius:8px;padding:10px 14px;font-size:12px;color:#cdd6e0;z-index:100;pointer-events:none;max-width:200px}
+#heatmap-wrap{overflow-x:auto}
+#loading{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;z-index:200;transition:opacity .4s}
+#loading.hidden{opacity:0;pointer-events:none}
+.spinner{width:32px;height:32px;border:2px solid var(--border);border-top-color:var(--good);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+#load-msg{font-size:12px;color:var(--muted);font-family:monospace}
+#error-box{display:none;margin:24px;padding:14px 18px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.25);border-radius:8px;color:#ef4444;font-size:13px}
+.ann-form{display:flex;gap:6px;padding:10px 24px;border-bottom:1px solid var(--border);background:var(--surface)}
+.ann-form input{flex:1;background:#080c10;border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none}
+.ann-form input:focus{border-color:var(--good)}
+.ann-form button{background:var(--border);border:none;border-radius:6px;padding:6px 12px;color:var(--text);font-size:12px;cursor:pointer}
+.ann-hint{font-size:10px;color:var(--muted);padding:4px 24px 8px;background:var(--surface)}
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <div class="gate-box">
+    <div><div class="gate-title">🌬️ Anton's Air</div><div class="gate-sub" style="margin-top:4px">Enter password to view live sensor data</div></div>
+    <input id="pw-input" type="password" placeholder="Password" onkeydown="if(event.key==='Enter')checkPw()">
+    <div id="pw-err">Incorrect password — try again</div>
+    <button class="gate-btn" onclick="checkPw()">Unlock Dashboard</button>
+  </div>
+</div>
+
+<div id="alert-bar">
+  <span>⚠️ </span><span id="alert-msg"></span>
+  <button id="alert-close" onclick="dismissAlert()">✕</button>
+</div>
+
+<div id="loading" class="hidden"><div class="spinner"></div><div id="load-msg">Fetching sensor data…</div></div>
+<div id="error-box"></div>
+
+<header>
+  <h1>Anton's Air Monitor</h1>
+  <div class="header-right">
+    <div id="aqi-badge"><span id="aqi-dot"></span><span id="aqi-label">—</span></div>
+    <div id="last-ts">—</div>
+    <div id="refresh-countdown"></div>
+  </div>
+</header>
+
+<div class="summary">
+  <div class="stat"><div class="stat-label">AQI (PM2.5)</div><div class="stat-value" id="s-aqi">—</div><div class="stat-sub" id="s-aqi-cat">—</div></div>
+  <div class="stat"><div class="stat-label">PM2.5 indoor</div><div class="stat-value" id="s-pm25">—</div><div class="stat-sub">µg/m³</div></div>
+  <div class="stat"><div class="stat-label">PM2.5 outdoor</div><div class="stat-value" id="s-outdoor">—</div><div class="stat-sub" id="s-outdoor-sub">µg/m³ · AirNow</div></div>
+  <div class="stat"><div class="stat-label">PM10</div><div class="stat-value" id="s-pm10">—</div><div class="stat-sub">µg/m³</div></div>
+  <div class="stat"><div class="stat-label">PM1.0</div><div class="stat-value" id="s-pm1">—</div><div class="stat-sub">µg/m³</div></div>
+  <div class="stat"><div class="stat-label">CO₂</div><div class="stat-value" id="s-co2">—</div><div class="stat-sub" id="s-co2-sub">ppm</div></div>
+  <div class="stat"><div class="stat-label">Particle size</div><div class="stat-value" id="s-tps">—</div><div class="stat-sub" id="s-tps-sub">µm typical</div></div>
+  <div class="stat"><div class="stat-label">24 h avg PM2.5</div><div class="stat-value" id="s-avg">—</div><div class="stat-sub">µg/m³</div></div>
+</div>
+
+<div id="weather-bar">Loading weather…</div>
+
+<div class="controls">
+  <div class="btn-group" id="range-btns">
+    <button data-h="24" class="active">24 h</button>
+    <button data-h="72">3 d</button>
+    <button data-h="168">7 d</button>
+    <button data-h="720">30 d</button>
+    <button data-h="0">All</button>
+  </div>
+  <div class="sep"></div>
+  <button id="refresh-btn" onclick="manualRefresh()">↻ Refresh</button>
+</div>
+
+<div class="ann-form">
+  <input id="ann-input" type="text" placeholder="Add note at current time (e.g. 'cooked dinner', 'opened windows')…" maxlength="80">
+  <button onclick="addAnnotation()">+ Note</button>
+</div>
+<div class="ann-hint">Notes appear as markers on the PM2.5 chart. Hover to read.</div>
+<div id="ann-tooltip"></div>
+
+<div class="charts">
+  <div class="chart-card wide">
+    <div class="chart-title">
+      PM2.5 — Indoor vs Outdoor
+      <span><span class="legend-dot" style="background:var(--good)"></span> Indoor</span>
+      <span><span class="legend-dot" style="background:var(--outdoor)"></span> Outdoor</span>
+    </div>
+    <div class="chart-wrap"><canvas id="pm25-chart"></canvas></div>
+  </div>
+  <div class="chart-card">
+    <div class="chart-title">AQI history (PM2.5)</div>
+    <div class="chart-wrap"><canvas id="aqi-chart"></canvas></div>
+  </div>
+  <div class="chart-card">
+    <div class="chart-title">CO₂ <span style="font-size:10px;color:var(--muted);font-weight:400">— yellow=1000ppm · red=1200ppm alert</span></div>
+    <div class="chart-wrap"><canvas id="co2-chart"></canvas></div>
+  </div>
+  <div class="chart-card">
+    <div class="chart-title">
+      Particle fractions
+      <span><span class="legend-dot" style="background:#38bdf8"></span> PM1</span>
+      <span><span class="legend-dot" style="background:var(--good)"></span> PM2.5</span>
+      <span><span class="legend-dot" style="background:#eab308"></span> PM4</span>
+      <span><span class="legend-dot" style="background:#f97316"></span> PM10</span>
+    </div>
+    <div class="chart-wrap"><canvas id="pm-stack-chart"></canvas></div>
+  </div>
+  <div class="chart-card">
+    <div class="chart-title">Typical Particle Size <span style="font-size:10px;color:var(--muted);font-weight:400">— fine &lt;1µm · coarse &gt;2.5µm</span></div>
+    <div class="chart-wrap"><canvas id="tps-chart"></canvas></div>
+  </div>
+  <div class="chart-card wide">
+    <div class="chart-title">PM2.5 hourly heatmap — last 7 days</div>
+    <div id="heatmap-wrap"><canvas id="heatmap-canvas"></canvas></div>
+  </div>
+</div>
+
+<script>
+// ── Config ────────────────────────────────────────────────────────────────────
+const LAT = 42.37759498991064;
+const LON = -71.10905314836033;
+const AIRNOW_KEY = '4A859474-8EF1-4707-B73D-C0FA1708A1C5';
+const CHANNEL = 3068037;
+const API = `https://api.thingspeak.com/channels/${CHANNEL}/feeds.json`;
+
+// ── Global error catchers ─────────────────────────────────────────────────────
+window.addEventListener('error', e => {
+  document.getElementById('loading').classList.add('hidden');
+  showErr('JS Error: ' + e.message + ' (line ' + e.lineno + ')');
+});
+window.addEventListener('unhandledrejection', e => {
+  document.getElementById('loading').classList.add('hidden');
+  showErr('Error: ' + (e.reason?.message || e.reason));
+});
+function showErr(msg) {
+  const eb = document.getElementById('error-box');
+  eb.style.display = 'block'; eb.textContent = msg;
+}
+
+// ── Password ──────────────────────────────────────────────────────────────────
+function checkPw() {
+  const val = document.getElementById('pw-input').value;
+  if (val === 'AntonsAir') {
+    try { sessionStorage.setItem('air_auth', '1'); } catch(e) {}
+    document.getElementById('gate').style.display = 'none';
+    requestNotifPermission();
+    waitForChart(20);
+  } else {
+    document.getElementById('pw-err').style.display = 'block';
+    document.getElementById('pw-input').value = '';
+    document.getElementById('pw-input').focus();
+  }
+}
+if (sessionStorage.getItem('air_auth') === '1')
+  document.getElementById('gate').style.display = 'none';
+
+// ── Notifications ─────────────────────────────────────────────────────────────
+function requestNotifPermission() {
+  if ('Notification' in window && Notification.permission === 'default')
+    Notification.requestPermission();
+}
+let alertDismissed = false;
+function checkAlerts(pm25, co2) {
+  const alerts = [];
+  if (pm25 >= 200) alerts.push(`PM2.5 is ${pm25.toFixed(1)} µg/m³ — HAZARDOUS`);
+  if (co2 && co2 >= 1200) alerts.push(`CO₂ is ${co2.toFixed(0)} ppm — ventilate now`);
+  const bar = document.getElementById('alert-bar');
+  if (alerts.length && !alertDismissed) {
+    document.getElementById('alert-msg').textContent = alerts.join(' · ');
+    bar.classList.add('show');
+    if ('Notification' in window && Notification.permission === 'granted')
+      new Notification('⚠️ Air Quality Alert', { body: alerts.join('\n') });
+  } else if (!alerts.length) {
+    bar.classList.remove('show');
+    alertDismissed = false;
+  }
+}
+function dismissAlert() {
+  alertDismissed = true;
+  document.getElementById('alert-bar').classList.remove('show');
+}
+
+// ── AQI (EPA formula) ─────────────────────────────────────────────────────────
+const AQI_BREAKS = [
+  { cLo:0,     cHi:12.0,  iLo:0,   iHi:50,  color:'#23c55e', label:'Good' },
+  { cLo:12.1,  cHi:35.4,  iLo:51,  iHi:100, color:'#eab308', label:'Moderate' },
+  { cLo:35.5,  cHi:55.4,  iLo:101, iHi:150, color:'#f97316', label:'Unhealthy for Sensitive' },
+  { cLo:55.5,  cHi:150.4, iLo:151, iHi:200, color:'#ef4444', label:'Unhealthy' },
+  { cLo:150.5, cHi:250.4, iLo:201, iHi:300, color:'#a855f7', label:'Very Unhealthy' },
+  { cLo:250.5, cHi:500.4, iLo:301, iHi:500, color:'#7e0023', label:'Hazardous' },
+];
+function calcAQI(pm25) {
+  const bp = AQI_BREAKS.find(b => pm25 >= b.cLo && pm25 <= b.cHi) || AQI_BREAKS[AQI_BREAKS.length-1];
+  return Math.round(((bp.iHi - bp.iLo) / (bp.cHi - bp.cLo)) * (pm25 - bp.cLo) + bp.iLo);
+}
+function aqiBand(pm25) {
+  return AQI_BREAKS.find(b => pm25 >= b.cLo && pm25 <= b.cHi) || AQI_BREAKS[AQI_BREAKS.length-1];
+}
+function aqiBandFromAQI(aqi) {
+  return AQI_BREAKS.find(b => aqi >= b.iLo && aqi <= b.iHi) || AQI_BREAKS[AQI_BREAKS.length-1];
+}
+
+// ── Weather (NWS — no API key needed) ────────────────────────────────────────
+async function fetchWeather() {
+  try {
+    const ptResp = await fetch(`https://api.weather.gov/points/${LAT},${LON}`);
+    if (!ptResp.ok) throw new Error('NWS points failed');
+    const ptJson = await ptResp.json();
+    const fResp = await fetch(ptJson.properties.forecastHourly);
+    if (!fResp.ok) throw new Error('NWS forecast failed');
+    const fJson = await fResp.json();
+    const p = fJson.properties.periods[0];
+    document.getElementById('weather-bar').innerHTML =
+      `<b>${p.temperature}°${p.temperatureUnit}</b> <span class="w-sep">·</span>
+       ${p.shortForecast} <span class="w-sep">·</span>
+       Wind <b>${p.windSpeed} ${p.windDirection}</b> <span class="w-sep">·</span>
+       Humidity <b>${p.relativeHumidity?.value ?? '—'}%</b> <span class="w-sep">·</span>
+       <span style="color:var(--muted);font-size:11px">NWS · ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}</span>`;
+  } catch(e) {
+    document.getElementById('weather-bar').textContent = 'Weather unavailable';
+  }
+}
+
+// ── Outdoor AQ ────────────────────────────────────────────────────────────────
+// Tries three sources in order until one works
+let outdoorPM25 = null;
+
+function setOutdoor(val, source) {
+  outdoorPM25 = val;
+  document.getElementById('s-outdoor').textContent = val.toFixed(1);
+  document.getElementById('s-outdoor-sub').textContent = `µg/m³ · AQI ${calcAQI(val)} · ${source}`;
+  // update the outdoor line on the chart if already drawn
+  if (charts.pm25) {
+    const n = charts.pm25.data.labels.length;
+    charts.pm25.data.datasets[1].data = Array(n).fill(val);
+    charts.pm25.update('none');
+  }
+}
+
+async function fetchOutdoorAQ() {
+  // ── Source 1: AirNow via a public CORS proxy ──────────────────────────────
+  try {
+    const airnowUrl = `https://www.airnowapi.org/aq/observation/latLong/current/?format=application/json&latitude=${LAT}&longitude=${LON}&distance=25&API_KEY=${AIRNOW_KEY}`;
+    const proxy = `https://corsproxy.io/?${encodeURIComponent(airnowUrl)}`;
+    const r = await fetch(proxy);
+    if (!r.ok) throw new Error('proxy HTTP ' + r.status);
+    const json = await r.json();
+    const pm = Array.isArray(json) ? json.find(o => o.ParameterName === 'PM2.5') : null;
+    if (pm && pm.Value >= 0) { setOutdoor(pm.Value, 'AirNow'); return; }
+  } catch(e) { console.warn('AirNow proxy failed:', e.message); }
+
+  // ── Source 2: OpenAQ v3 (newer endpoint, better CORS support) ────────────
+  try {
+    const oUrl = `https://api.openaq.org/v3/locations?coordinates=${LAT},${LON}&radius=25000&parameters_id=2&limit=5`;
+    const oResp = await fetch(oUrl, { headers: { accept: 'application/json' } });
+    if (!oResp.ok) throw new Error('OpenAQ v3 ' + oResp.status);
+    const oJson = await oResp.json();
+    const loc = oJson.results?.[0];
+    if (!loc) throw new Error('no location');
+    const mResp = await fetch(`https://api.openaq.org/v3/locations/${loc.id}/latest`, { headers: { accept: 'application/json' } });
+    if (!mResp.ok) throw new Error('OpenAQ latest ' + mResp.status);
+    const mJson = await mResp.json();
+    // parameters_id=2 is pm25
+    const pm = mJson.results?.find(m => m.parameter === 'pm25' || m.parametersId === 2);
+    if (pm && pm.value >= 0) { setOutdoor(pm.value, 'OpenAQ'); return; }
+  } catch(e) { console.warn('OpenAQ v3 failed:', e.message); }
+
+  // ── Source 3: EPA AirNow current conditions page (JSON feed) ─────────────
+  try {
+    // AirNow publishes zip-code based JSON used by their own website
+    const zipUrl = `https://www.airnow.gov/api/aqi?lat=${LAT}&lon=${LON}`;
+    const r3 = await fetch(zipUrl);
+    if (!r3.ok) throw new Error('airnow.gov ' + r3.status);
+    const j3 = await r3.json();
+    const pm = Array.isArray(j3) ? j3.find(o => o.ParameterName === 'PM2.5') : null;
+    if (pm && pm.Value >= 0) { setOutdoor(pm.Value, 'AirNow'); return; }
+  } catch(e) { console.warn('airnow.gov failed:', e.message); }
+
+  // All sources failed
+  document.getElementById('s-outdoor').textContent = '—';
+  document.getElementById('s-outdoor-sub').textContent = 'µg/m³ · no nearby station';
+  console.warn('All outdoor AQ sources failed');
+}
+
+// ── Annotations ───────────────────────────────────────────────────────────────
+let annotations = [];
+try { annotations = JSON.parse(localStorage.getItem('air_annotations') || '[]'); } catch(e) {}
+function saveAnnotations() {
+  try { localStorage.setItem('air_annotations', JSON.stringify(annotations.slice(-200))); } catch(e) {}
+}
+function addAnnotation() {
+  const input = document.getElementById('ann-input');
+  const text = input.value.trim();
+  if (!text) return;
+  annotations.push({ t: new Date().toISOString(), text });
+  saveAnnotations();
+  input.value = '';
+  render();
+}
+
+// ── Chart defaults ────────────────────────────────────────────────────────────
+function initChartDefaults() {
+  Chart.defaults.color = '#5a6a7a';
+  Chart.defaults.borderColor = '#1c2330';
+  Chart.defaults.font.family = "'Inter',system-ui,sans-serif";
+  Chart.defaults.font.size = 11;
+}
+const BASE_OPTS = (unit) => ({
+  responsive: true, maintainAspectRatio: false, animation: { duration: 300 },
+  interaction: { mode: 'index', intersect: false },
+  plugins: {
+    legend: { display: false },
+    tooltip: { backgroundColor:'#0e1419', borderColor:'#1c2330', borderWidth:1, padding:10, titleColor:'#cdd6e0', bodyColor:'#8a9ab0' }
+  },
+  scales: {
+    x: { type:'time', time:{ unit:unit||'hour', tooltipFormat:'MMM d, HH:mm' }, grid:{ color:'#1c2330' }, ticks:{ maxTicksLimit:8, maxRotation:0 } },
+    y: { grid:{ color:'#1c2330' }, beginAtZero:true }
+  }
+});
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let allData = [], rangeHours = 24, charts = {};
+let refreshTimer = 120, refreshInterval = null;
+
+// ── Fetch ThingSpeak ──────────────────────────────────────────────────────────
+async function fetchData() {
+  document.getElementById('loading').classList.remove('hidden');
+  allData = [];
+  try {
+    let endTime = null;
+    for (let page = 0; page < 3; page++) {
+      const p = new URLSearchParams({ results: 8000 });
+      if (endTime) p.set('end', endTime);
+      document.getElementById('load-msg').textContent = `Fetching page ${page+1} of sensor data…`;
+      const r = await fetch(`${API}?${p}`);
+      if (!r.ok) throw new Error(`ThingSpeak HTTP ${r.status}`);
+      const json = await r.json();
+      const feeds = json.feeds || [];
+      if (!feeds.length) break;
+      feeds.forEach(f => {
+        const t = new Date(f.created_at);
+        const pm25 = parseFloat(f.field3);
+        if (!isNaN(pm25)) allData.push({
+          t,
+          co2:  parseFloat(f.field1) || null,
+          pm1:  parseFloat(f.field2) || null,
+          pm25,
+          pm4:  parseFloat(f.field4) || null,
+          pm10: parseFloat(f.field5) || null,
+          tps:  parseFloat(f.field6) || null,
+        });
+      });
+      const oldest = feeds.reduce((m,f) => new Date(f.created_at) < m ? new Date(f.created_at) : m, new Date(feeds[0].created_at));
+      endTime = new Date(oldest - 1000).toISOString().replace('.000Z','Z');
+      if (feeds.length < 8000) break;
+    }
+    allData.sort((a,b) => a.t - b.t);
+    document.getElementById('loading').classList.add('hidden');
+    fetchWeather();
+    fetchOutdoorAQ();
+    render();
+    startRefreshTimer();
+  } catch(e) {
+    document.getElementById('loading').classList.add('hidden');
+    showErr('Fetch error: ' + e.message);
+  }
+}
+
+// ── Refresh timer ─────────────────────────────────────────────────────────────
+function startRefreshTimer() {
+  if (refreshInterval) clearInterval(refreshInterval);
+  refreshTimer = 120;
+  updateCountdown();
+  refreshInterval = setInterval(() => {
+    refreshTimer--;
+    updateCountdown();
+    if (refreshTimer <= 0) { clearInterval(refreshInterval); fetchData(); }
+  }, 1000);
+}
+function updateCountdown() {
+  document.getElementById('refresh-countdown').textContent = `↻ in ${refreshTimer}s`;
+}
+function manualRefresh() {
+  if (refreshInterval) clearInterval(refreshInterval);
+  fetchData();
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function filtered() {
+  if (!rangeHours || !allData.length) return allData;
+  const cutoff = new Date(allData[allData.length-1].t - rangeHours * 3600_000);
+  return allData.filter(d => d.t >= cutoff);
+}
+function tUnit() { return rangeHours <= 24 ? 'hour' : rangeHours <= 168 ? 'day' : 'week'; }
+function avg(arr) { const v = arr.filter(x => x != null && isFinite(x)); return v.length ? v.reduce((a,b) => a+b, 0) / v.length : 0; }
+function setText(id, val, color) { const el = document.getElementById(id); if (!el) return; el.textContent = val; el.style.color = color || ''; }
+
+// ── Render ────────────────────────────────────────────────────────────────────
+function render() {
+  const data = filtered();
+  if (!data.length) return;
+  const latest = data[data.length-1];
+  const band = aqiBand(latest.pm25);
+  const aqi = calcAQI(latest.pm25);
+  const last720 = data.slice(-720);
+  const avg24 = avg(last720.map(d => d.pm25));
+
+  setText('s-aqi', aqi, band.color);
+  setText('s-aqi-cat', band.label, band.color);
+  setText('s-pm25', latest.pm25.toFixed(1), band.color);
+  setText('s-pm10', latest.pm10 != null ? latest.pm10.toFixed(1) : '—');
+  setText('s-pm1',  latest.pm1  != null ? latest.pm1.toFixed(1)  : '—');
+  setText('s-avg',  avg24.toFixed(1));
+
+  const co2 = latest.co2;
+  if (co2 != null) {
+    setText('s-co2', co2.toFixed(0), co2 >= 1200 ? '#ef4444' : co2 >= 1000 ? '#eab308' : null);
+    const sub = document.getElementById('s-co2-sub');
+    if (sub) sub.textContent = co2 >= 1200 ? 'ppm · VENTILATE' : co2 >= 1000 ? 'ppm · getting stuffy' : 'ppm';
+  } else {
+    setText('s-co2', '—');
+  }
+
+  const tps = latest.tps;
+  if (tps != null) {
+    setText('s-tps', tps.toFixed(2), tps < 1 ? '#23c55e' : tps < 2.5 ? '#eab308' : '#f97316');
+    const tpsSub = document.getElementById('s-tps-sub');
+    if (tpsSub) tpsSub.textContent = 'µm · ' + (tps < 1 ? 'fine · combustion/smoke' : tps < 2.5 ? 'mixed' : 'coarse · dust/pollen');
+  }
+
+  const badge = document.getElementById('aqi-badge');
+  badge.style.background = band.color + '18';
+  badge.style.color = band.color;
+  badge.style.borderColor = band.color + '40';
+  document.getElementById('aqi-label').textContent = `AQI ${aqi} · ${band.label}`;
+  document.getElementById('last-ts').textContent = 'Updated ' + latest.t.toLocaleString('en-US', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+
+  checkAlerts(latest.pm25, co2);
+  drawPM25(data);
+  drawAQI(data);
+  drawCO2(data);
+  drawPMStack(data);
+  drawTPS(data);
+  drawHeatmap();
+}
+
+// ── PM2.5 chart ───────────────────────────────────────────────────────────────
+function annInRange(data) {
+  if (!data.length) return [];
+  const tMin = data[0].t.getTime(), tMax = data[data.length-1].t.getTime();
+  return annotations.filter(a => { const t = new Date(a.t).getTime(); return t >= tMin && t <= tMax; })
+    .map(a => ({ t: new Date(a.t), text: a.text }));
+}
+
+function drawPM25(data) {
+  const labels = data.map(d => d.t);
+  const vals = data.map(d => d.pm25);
+  const anns = annInRange(data);
+
+  if (charts.pm25) {
+    charts.pm25.data.labels = labels;
+    charts.pm25.data.datasets[0].data = vals;
+    charts.pm25.data.datasets[1].data = labels.map(() => outdoorPM25);
+    charts.pm25.options.scales.x.time.unit = tUnit();
+    charts.pm25.update('none');
+    drawAnnotationMarkers(data, anns);
+    return;
+  }
+  const ctx = document.getElementById('pm25-chart').getContext('2d');
+  const grad = ctx.createLinearGradient(0,0,0,230);
+  grad.addColorStop(0, 'rgba(35,197,94,.18)'); grad.addColorStop(1, 'rgba(35,197,94,0)');
+
+  charts.pm25 = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets: [
+      { label:'Indoor PM2.5', data:vals, borderWidth:1.5, pointRadius:0, fill:true,
+        backgroundColor:grad, tension:0.2,
+        segment:{ borderColor: c => aqiBand(vals[c.p1DataIndex]).color } },
+      { label:'Outdoor PM2.5', data:labels.map(() => outdoorPM25),
+        borderColor:'#fb923c', borderWidth:1.5, borderDash:[5,4],
+        pointRadius:0, fill:false, tension:0 },
+    ]},
+    options: {
+      ...BASE_OPTS(tUnit()),
+      plugins: { ...BASE_OPTS().plugins, tooltip: { ...BASE_OPTS().plugins.tooltip,
+        callbacks: { label: i => {
+          if (i.datasetIndex === 1) return outdoorPM25 != null ? ` Outdoor PM2.5: ${outdoorPM25.toFixed(1)} µg/m³` : null;
+          const v = i.raw; const b = aqiBand(v);
+          return ` Indoor PM2.5: ${v.toFixed(1)} µg/m³  ·  AQI ${calcAQI(v)}  ·  ${b.label}`;
+        }}
+      }}
+    }
+  });
+  setTimeout(() => drawAnnotationMarkers(data, anns), 150);
+}
+
+function drawAnnotationMarkers(data, anns) {
+  const canvas = document.getElementById('pm25-chart');
+  if (!canvas || !charts.pm25 || !anns.length) return;
+  const old = document.getElementById('pm25-chart-overlay');
+  if (old) old.remove();
+  const overlay = document.createElement('canvas');
+  overlay.id = 'pm25-chart-overlay';
+  overlay.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none';
+  overlay.width = canvas.width; overlay.height = canvas.height;
+  canvas.parentElement.style.position = 'relative';
+  canvas.parentElement.appendChild(overlay);
+  const ctx = overlay.getContext('2d');
+  anns.forEach(a => {
+    const idx = data.findIndex(d => d.t >= a.t);
+    if (idx < 0) return;
+    const meta = charts.pm25.getDatasetMeta(0);
+    if (!meta.data[idx]) return;
+    const pt = meta.data[idx];
+    ctx.beginPath(); ctx.arc(pt.x, pt.y - 12, 5, 0, Math.PI*2);
+    ctx.fillStyle = '#cdd6e0'; ctx.fill();
+    ctx.fillStyle = '#080c10'; ctx.font = 'bold 8px Inter,sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('N', pt.x, pt.y - 9);
+  });
+  canvas.addEventListener('mousemove', e => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const my = (e.clientY - rect.top) * (canvas.height / rect.height);
+    let found = null;
+    anns.forEach(a => {
+      const idx = data.findIndex(d => d.t >= a.t);
+      if (idx < 0) return;
+      const meta = charts.pm25.getDatasetMeta(0);
+      if (!meta.data[idx]) return;
+      const pt = meta.data[idx];
+      if (Math.hypot(mx - pt.x, my - (pt.y-12)) < 10) found = a;
+    });
+    const tip = document.getElementById('ann-tooltip');
+    if (found) {
+      tip.style.display = 'block';
+      tip.style.left = (e.clientX + 12) + 'px'; tip.style.top = (e.clientY - 8) + 'px';
+      tip.textContent = `📝 ${new Date(found.t).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})} — ${found.text}`;
+    } else { tip.style.display = 'none'; }
+  });
+}
+
+// ── AQI chart ─────────────────────────────────────────────────────────────────
+function drawAQI(data) {
+  const labels = data.map(d => d.t);
+  const vals = data.map(d => calcAQI(d.pm25));
+  if (charts.aqi) {
+    charts.aqi.data.labels = labels;
+    charts.aqi.data.datasets[0].data = vals;
+    charts.aqi.data.datasets[0].backgroundColor = vals.map(v => aqiBandFromAQI(v).color + '99');
+    charts.aqi.options.scales.x.time.unit = tUnit();
+    charts.aqi.update('none'); return;
+  }
+  charts.aqi = new Chart(document.getElementById('aqi-chart').getContext('2d'), {
+    type: 'bar',
+    data: { labels, datasets: [{ data:vals, backgroundColor:vals.map(v=>aqiBandFromAQI(v).color+'99'), borderWidth:0, barPercentage:1, categoryPercentage:1 }] },
+    options: {
+      ...BASE_OPTS(tUnit()),
+      plugins: { ...BASE_OPTS().plugins, tooltip: { ...BASE_OPTS().plugins.tooltip,
+        callbacks: { label: i => { const b = aqiBandFromAQI(i.raw); return ` AQI ${i.raw} · ${b.label}`; } }
+      }},
+      scales: { ...BASE_OPTS().scales, y: { ...BASE_OPTS().scales.y, suggestedMax:200,
+        ticks: { callback: v => v===50?'Good':v===100?'Moderate':v===150?'Sensitive':v===200?'Unhealthy':v }
+      }}
+    }
+  });
+}
+
+// ── CO2 chart ─────────────────────────────────────────────────────────────────
+function drawCO2(data) {
+  const d2 = data.filter(d => d.co2 != null && d.co2 > 0);
+  const labels = d2.map(d => d.t), vals = d2.map(d => d.co2);
+  if (charts.co2) {
+    charts.co2.data.labels = labels;
+    charts.co2.data.datasets[0].data = vals;
+    charts.co2.options.scales.x.time.unit = tUnit();
+    charts.co2.update('none'); return;
+  }
+  const ctx = document.getElementById('co2-chart').getContext('2d');
+  const grad = ctx.createLinearGradient(0,0,0,190);
+  grad.addColorStop(0, 'rgba(56,189,248,.18)'); grad.addColorStop(1, 'rgba(56,189,248,0)');
+  charts.co2 = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets: [{
+      data:vals, borderColor:'#38bdf8', backgroundColor:grad,
+      borderWidth:1.5, pointRadius:0, fill:true, tension:0.2,
+      segment: { borderColor: c => { const v = vals[c.p1DataIndex]; return v>=1200?'#ef4444':v>=1000?'#eab308':'#38bdf8'; } }
+    }]},
+    options: {
+      ...BASE_OPTS(tUnit()),
+      plugins: { ...BASE_OPTS().plugins, tooltip: { ...BASE_OPTS().plugins.tooltip,
+        callbacks: { label: i => { const v = i.raw; return ` CO₂: ${v.toFixed(0)} ppm${v>=1200?' · VENTILATE':v>=1000?' · getting stuffy':''}`; } }
+      }},
+      scales: { ...BASE_OPTS().scales,
+        y: { grid:{color:'#1c2330'}, suggestedMin:400,
+          ticks: { callback: v => v===1000?'1000 ⚠':v===1200?'1200 🚨':v } }
+      }
+    }
+  });
+}
+
+// ── Particle fractions ────────────────────────────────────────────────────────
+function drawPMStack(data) {
+  const labels = data.map(d => d.t);
+  const series = [
+    { label:'PM1.0', key:'pm1',  color:'#38bdf8' },
+    { label:'PM2.5', key:'pm25', color:'#23c55e' },
+    { label:'PM4.0', key:'pm4',  color:'#eab308' },
+    { label:'PM10',  key:'pm10', color:'#f97316' },
+  ];
+  const ds = series.map(s => ({ label:s.label, data:data.map(d=>d[s.key]),
+    borderColor:s.color, backgroundColor:s.color+'15', borderWidth:1.2, pointRadius:0, fill:false, tension:0.2 }));
+  if (charts.pmStack) {
+    charts.pmStack.data.labels = labels;
+    charts.pmStack.data.datasets.forEach((d,i) => d.data = ds[i].data);
+    charts.pmStack.options.scales.x.time.unit = tUnit();
+    charts.pmStack.update('none'); return;
+  }
+  charts.pmStack = new Chart(document.getElementById('pm-stack-chart').getContext('2d'), {
+    type: 'line', data: { labels, datasets: ds },
+    options: { ...BASE_OPTS(tUnit()), plugins: { ...BASE_OPTS().plugins, legend: { display:false } } }
+  });
+}
+
+// ── Typical Particle Size ─────────────────────────────────────────────────────
+function drawTPS(data) {
+  const d2 = data.filter(d => d.tps != null && d.tps > 0);
+  const labels = d2.map(d => d.t), vals = d2.map(d => d.tps);
+  if (charts.tps) {
+    charts.tps.data.labels = labels;
+    charts.tps.data.datasets[0].data = vals;
+    charts.tps.options.scales.x.time.unit = tUnit();
+    charts.tps.update('none'); return;
+  }
+  const ctx = document.getElementById('tps-chart').getContext('2d');
+  const grad = ctx.createLinearGradient(0,0,0,190);
+  grad.addColorStop(0, 'rgba(192,132,252,.18)'); grad.addColorStop(1, 'rgba(192,132,252,0)');
+  charts.tps = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets: [{ data:vals, borderColor:'#c084fc', backgroundColor:grad,
+      borderWidth:1.5, pointRadius:0, fill:true, tension:0.2 }] },
+    options: {
+      ...BASE_OPTS(tUnit()),
+      plugins: { ...BASE_OPTS().plugins, tooltip: { ...BASE_OPTS().plugins.tooltip,
+        callbacks: { label: i => { const v = i.raw;
+          return ` TPS: ${v.toFixed(2)} µm · ${v<1?'fine (combustion/smoke)':v<2.5?'mixed':'coarse (dust/pollen)'}`; } }
+      }},
+      scales: { ...BASE_OPTS().scales,
+        y: { grid:{color:'#1c2330'}, beginAtZero:false, ticks:{ callback: v => v+'µm' } }
+      }
+    }
+  });
+}
+
+// ── Heatmap ───────────────────────────────────────────────────────────────────
+function drawHeatmap() {
+  const cutoff = new Date(allData[allData.length-1].t - 7 * 86400_000);
+  const data = allData.filter(d => d.t >= cutoff);
+  const byDayHour = {};
+  data.forEach(d => {
+    const date = d.t.toLocaleDateString('en-CA');
+    const hour = d.t.getHours();
+    if (!byDayHour[date]) byDayHour[date] = {};
+    if (!byDayHour[date][hour]) byDayHour[date][hour] = [];
+    byDayHour[date][hour].push(d.pm25);
+  });
+  const dates = Object.keys(byDayHour).sort();
+  if (!dates.length) return;
+  const COLS = 24;
+  const CELL_W = Math.max(26, Math.floor((document.getElementById('heatmap-wrap').clientWidth - 60) / COLS));
+  const CELL_H = 28, LABEL_W = 56, HEADER_H = 22;
+  const canvas = document.getElementById('heatmap-canvas');
+  const W = LABEL_W + COLS * CELL_W, H = HEADER_H + dates.length * CELL_H;
+  canvas.width = W; canvas.height = H; canvas.style.width = W+'px'; canvas.style.height = H+'px';
+  const ctx = canvas.getContext('2d'); ctx.clearRect(0, 0, W, H);
+  ctx.font = '9px Inter,system-ui,sans-serif'; ctx.fillStyle = '#5a6a7a'; ctx.textAlign = 'center';
+  for (let h = 0; h < COLS; h++)
+    if (h % 3 === 0) ctx.fillText(`${String(h).padStart(2,'0')}:00`, LABEL_W + h*CELL_W + CELL_W/2, 14);
+  dates.forEach((date, ri) => {
+    ctx.font = '9px Inter,system-ui,sans-serif'; ctx.fillStyle = '#5a6a7a'; ctx.textAlign = 'right';
+    ctx.fillText(new Date(date+'T12:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}),
+      LABEL_W-6, HEADER_H + ri*CELL_H + CELL_H/2 + 3);
+    for (let h = 0; h < COLS; h++) {
+      const vals = byDayHour[date]?.[h];
+      const x = LABEL_W + h*CELL_W, y = HEADER_H + ri*CELL_H;
+      if (!vals?.length) { ctx.fillStyle = '#0e1419'; ctx.fillRect(x+1,y+1,CELL_W-2,CELL_H-2); continue; }
+      const mean = vals.reduce((a,b) => a+b, 0) / vals.length;
+      const band = aqiBand(mean);
+      ctx.globalAlpha = 0.3 + Math.min(0.7, mean/55);
+      ctx.fillStyle = band.color; ctx.fillRect(x+1,y+1,CELL_W-2,CELL_H-2);
+      ctx.globalAlpha = 1;
+      ctx.font = '8px Inter,system-ui,sans-serif';
+      ctx.fillStyle = mean < 20 ? '#000' : '#fff'; ctx.textAlign = 'center';
+      ctx.fillText(mean.toFixed(0), x+CELL_W/2, y+CELL_H/2+3);
+    }
+  });
+}
+
+// ── Controls ──────────────────────────────────────────────────────────────────
+document.querySelectorAll('#range-btns button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#range-btns button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    rangeHours = parseInt(btn.dataset.h);
+    render();
+  });
+});
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+function waitForChart(attempts) {
+  if (typeof Chart !== 'undefined' && typeof Chart.defaults !== 'undefined') {
+    initChartDefaults();
+    fetchData();
+  } else if (attempts > 0) {
+    document.getElementById('load-msg').textContent = 'Loading chart library…';
+    setTimeout(() => waitForChart(attempts-1), 500);
+  } else {
+    document.getElementById('loading').classList.add('hidden');
+    showErr('Could not load Chart.js. Check your internet and reload.');
+  }
+}
+
+if (sessionStorage.getItem('air_auth') === '1') {
+  requestNotifPermission();
+  waitForChart(20);
+}
+</script>
+</body>
+</html>
